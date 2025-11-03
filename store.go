@@ -14,10 +14,10 @@ type updateFn[V any] func(cur, prev V) bool
 
 // TODO: Do we need this to be a separate struct from Item?
 type storeItem[V any] struct {
-	key        uint64
-	conflict   uint64
-	value      V
-	expiration time.Time
+	key        uint64    //key的哈希值1
+	conflict   uint64    //key的哈希值2
+	value      V         //存储的值
+	expiration time.Time //过期时间
 }
 
 // store is the interface fulfilled by all hash map implementations in this
@@ -52,11 +52,11 @@ func newStore[V any]() store[V] {
 	return newShardedMap[V]()
 }
 
-const numShards uint64 = 256
+const numShards uint64 = 256 //分片数量
 
 type shardedMap[V any] struct {
-	shards    []*lockedMap[V]
-	expiryMap *expirationMap[V]
+	shards    []*lockedMap[V]   //缓存分片，每个分片是一个独立的map
+	expiryMap *expirationMap[V] //
 }
 
 func newShardedMap[V any]() *shardedMap[V] {
@@ -114,9 +114,9 @@ func (sm *shardedMap[V]) Clear(onEvict func(item *Item[V])) {
 
 type lockedMap[V any] struct {
 	sync.RWMutex
-	data         map[uint64]storeItem[V]
+	data         map[uint64]storeItem[V] //实际存储数据的map，map[key的哈希值1]storeItem[V]
 	em           *expirationMap[V]
-	shouldUpdate updateFn[V]
+	shouldUpdate updateFn[V] //用于判断是否允许更新的函数
 }
 
 func newLockedMap[V any](em *expirationMap[V]) *lockedMap[V] {
@@ -171,11 +171,14 @@ func (m *lockedMap[V]) Set(i *Item[V]) {
 		// The item existed already. We need to check the conflict key and reject the
 		// update if they do not match. Only after that the expiration map is updated.
 		if i.Conflict != 0 && (i.Conflict != item.conflict) {
+			//对于更新一个已存在key的值，如果第二哈希值不匹配，则表示不是同一个key，则不允许更新
 			return
 		}
 		if m.shouldUpdate != nil && !m.shouldUpdate(i.Value, item.value) {
+			//不允许更新
 			return
 		}
+
 		m.em.update(i.Key, i.Conflict, item.expiration, i.Expiration)
 	} else {
 		// The value is not in the map already. There's no need to return anything.

@@ -26,12 +26,12 @@ func cleanupBucket(t time.Time) int64 {
 }
 
 // bucket type is a map of key to conflict.
-type bucket map[uint64]uint64
+type bucket map[uint64]uint64 //map[key的哈希值1]key的哈希值2
 
 // expirationMap is a map of bucket number to the corresponding bucket.
 type expirationMap[V any] struct {
 	sync.RWMutex
-	buckets              map[int64]bucket
+	buckets              map[int64]bucket //map[根据过期时间计算出来的bucket编号]
 	lastCleanedBucketNum int64
 }
 

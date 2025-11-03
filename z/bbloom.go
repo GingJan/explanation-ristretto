@@ -49,7 +49,7 @@ func calcSizeByWrongPositives(numEntries, wrongs float64) (uint64, uint64) {
 	return uint64(size), uint64(locs)
 }
 
-// NewBloomFilter returns a new bloomfilter.
+// NewBloomFilter 创建一个新的布隆过滤器
 func NewBloomFilter(params ...float64) (bloomfilter *Bloom) {
 	var entries, locs uint64
 	if len(params) == 2 {

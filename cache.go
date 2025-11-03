@@ -39,15 +39,14 @@ type Key = z.Key
 // policy and a Sampled LFU eviction policy. You can use the same Cache instance
 // from as many goroutines as you want.
 type Cache[K Key, V any] struct {
-	// storedItems is the central concurrent hashmap where key-value items are stored.
+	// storedItems 一个线程安全的哈希表，用于存储键值对。
 	storedItems store[V]
-	// cachePolicy determines what gets let in to the cache and what gets kicked out.
+	// cachePolicy 决定哪些数据可以进入缓存以及哪些数据需要被驱逐。
 	cachePolicy *defaultPolicy[V]
-	// getBuf is a custom ring buffer implementation that gets pushed to when
+	// getBuf 环形缓冲队列 is a custom ring buffer implementation that gets pushed to when
 	// keys are read.
 	getBuf *ringBuffer
-	// setBuf is a buffer allowing us to batch/drop Sets during times of high
-	// contention.
+	// setBuf 缓冲区，高并发场景下为了性能实现的批量写入操作
 	setBuf chan *Item[V]
 	// onEvict is called for item evictions.
 	onEvict func(*Item[V])
@@ -58,6 +57,7 @@ type Cache[K Key, V any] struct {
 	// KeyToHash function is used to customize the key hashing algorithm.
 	// Each key will be hashed using the provided function. If keyToHash value
 	// is not set, the default keyToHash function is used.
+	// 计算K的哈希值的哈希函数
 	keyToHash func(K) (uint64, uint64)
 	// stop is used to stop the processItems goroutine.
 	stop chan struct{}
@@ -137,14 +137,10 @@ type Config[K Key, V any] struct {
 	// as well as on rejection of the value.
 	OnExit func(val V)
 
-	// ShouldUpdate is called when a value already exists in cache and is being updated.
-	// If ShouldUpdate returns true, the cache continues with the update (Set). If the
-	// function returns false, no changes are made in the cache. If the value doesn't
-	// already exist, the cache continue with setting that value for the given key.
-	//
-	// In this function, you can check whether the new value is valid. For example, if
-	// your value has timestamp assosicated with it, you could check whether the new
-	// value has the latest timestamp, preventing you from setting an older value.
+	// 当一个key的缓存已存在并且该key要更新时，调用该方法，用于判断是否允许更新该key的值
+	// 该方法返回true表示允许更新，返回false表示不允许更新
+	// 如果缓存中不存在该key，则直接设置该key的值
+	// 在这个方法的实现离，你可以检查新值是否有效。例如，如果你的值有时间戳，你可以检查新值是否有最新的时间戳，从而防止设置一个较旧的值。
 	ShouldUpdate func(cur, prev V) bool
 
 	// KeyToHash function is used to customize the key hashing algorithm.
@@ -193,8 +189,8 @@ const (
 // Item is a full representation of what's stored in the cache for each key-value pair.
 type Item[V any] struct {
 	flag       itemFlag
-	Key        uint64
-	Conflict   uint64
+	Key        uint64 //key的哈希值1
+	Conflict   uint64 //key的哈希值2，用于避免因哈希值1相同而引起的冲突
 	Value      V
 	Cost       int64
 	Expiration time.Time
