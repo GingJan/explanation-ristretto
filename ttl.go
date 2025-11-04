@@ -31,7 +31,7 @@ type bucket map[uint64]uint64 //map[key的哈希值1]key的哈希值2
 // expirationMap is a map of bucket number to the corresponding bucket.
 type expirationMap[V any] struct {
 	sync.RWMutex
-	buckets              map[int64]bucket //map[根据过期时间计算出来的bucket编号]
+	buckets              map[int64]bucket //map[根据过期时间计算出来的bucket编号]map[key的哈希值1]key的哈希值2
 	lastCleanedBucketNum int64
 }
 
@@ -133,14 +133,15 @@ func (m *expirationMap[V]) cleanup(store store[V], policy *defaultPolicy[V], onE
 
 	for _, keys := range buckets {
 		for key, conflict := range keys {
-			expr := store.Expiration(key)
+			expr := store.Expiration(key) //过期时间
 			// Sanity check. Verify that the store agrees that this key is expired.
+			// 合理性检查。确认存储（store）同意该键（key）已过期。
 			if expr.After(now) {
 				continue
 			}
 
-			cost := policy.Cost(key)
-			policy.Del(key)
+			cost := policy.Cost(key) //获取key的cost
+			policy.Del(key)          //删除key的cost
 			_, value := store.Del(key, conflict)
 
 			if onEvict != nil {

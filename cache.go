@@ -22,7 +22,7 @@ import (
 
 var (
 	// TODO: find the optimal value for this or make it configurable
-	setBufSize = 32 * 1024
+	setBufSize = 32 * 1024 //32k
 )
 
 const itemSize = int64(unsafe.Sizeof(storeItem[any]{}))
@@ -65,7 +65,7 @@ type Cache[K Key, V any] struct {
 	// indicates whether cache is closed.
 	isClosed atomic.Bool
 	// cost calculates cost from a value.
-	cost func(value V) int64
+	cost func(value V) int64 //用于计算key缓存的cost
 	// ignoreInternalCost dictates whether to ignore the cost of internally storing
 	// the item in the cost calculation.
 	ignoreInternalCost bool
@@ -94,21 +94,10 @@ type Config[K Key, V any] struct {
 	// you expect to keep in the cache when full.
 	NumCounters int64
 
-	// MaxCost is how eviction decisions are made. For example, if MaxCost is
-	// 100 and a new item with a cost of 1 increases total cache cost to 101,
-	// 1 item will be evicted.
-	//
-	// MaxCost can be considered as the cache capacity, in whatever units you
-	// choose to use.
-	//
-	// For example, if you want the cache to have a max capacity of 100MB, you
-	// would set MaxCost to 100,000,000 and pass an item's number of bytes as
-	// the `cost` parameter for calls to Set. If new items are accepted, the
-	// eviction process will take care of making room for the new item and not
-	// overflowing the MaxCost value.
-	//
-	// MaxCost could be anything as long as it matches how you're using the cost
-	// values when calling Set.
+	//MaxCost 的作用及其在缓存驱逐决策中的意义。MaxCost 定义了缓存的最大容量，超出该容量时会触发驱逐操作，以确保缓存不会溢出。
+	//例如，如果 MaxCost 设置为 100，而一个新项的成本为 1，导致总成本增加到 101，则会驱逐至少一个项以保持总成本不超过 MaxCost。这表明 MaxCost 是缓存容量的核心指标，开发者可以根据具体需求定义其单位。
+	//代码中提到，MaxCost 的单位是灵活的。例如，如果希望缓存的最大容量为 100MB，可以将 MaxCost 设置为 100,000,000，并在调用 Set 方法时将每个项的字节数作为 cost 参数传入。缓存会根据驱逐策略自动腾出空间以容纳新项。
+	//总之，MaxCost 是缓存容量管理的关键配置，开发者需要确保其值与 Set 方法中使用的成本单位一致，以实现正确的驱逐行为。
 	MaxCost int64
 
 	// BufferItems determines the size of Get buffers.
@@ -192,7 +181,7 @@ type Item[V any] struct {
 	Key        uint64 //key的哈希值1
 	Conflict   uint64 //key的哈希值2，用于避免因哈希值1相同而引起的冲突
 	Value      V
-	Cost       int64
+	Cost       int64 //占用的内存空间/字节
 	Expiration time.Time
 	wait       chan struct{}
 }
@@ -262,6 +251,8 @@ func NewCache[K Key, V any](config *Config[K, V]) (*Cache[K, V], error) {
 
 // Wait blocks until all buffered writes have been applied. This ensures a call to Set()
 // will be visible to future calls to Get().
+// 阻塞知道所有写入缓冲区的写入操作都被处理完毕。这确保对 Set() 的调用设置的key，在调用 Get() 时是可见的。
+// 调用该方法等待所有key完成写入后才返回/继续执行后续逻辑
 func (c *Cache[K, V]) Wait() {
 	if c == nil || c.isClosed.Load() {
 		return
@@ -431,6 +422,7 @@ func (c *Cache[K, V]) Close() {
 // Clear empties the hashmap and zeroes all cachePolicy counters. Note that this is
 // not an atomic operation (but that shouldn't be a problem as it's assumed that
 // Set/Get calls won't be occurring until after this).
+// 调用时，先把缓存停止，再清空缓存中的所有key，最后重新启动缓存处理协程
 func (c *Cache[K, V]) Clear() {
 	if c == nil || c.isClosed.Load() {
 		return
@@ -449,6 +441,7 @@ loop:
 				continue
 			}
 			if i.flag != itemUpdate {
+				// 非更新操作，则需要把不用的key淘汰
 				// In itemUpdate, the value is already set in the storedItems.  So, no need to call
 				// onEvict here.
 				c.onEvict(i)
@@ -524,17 +517,19 @@ func (c *Cache[K, V]) processItems() {
 
 	for {
 		select {
-		case i := <-c.setBuf:
+		case i := <-c.setBuf: //set请求都会到这里处理
 			if i.wait != nil {
 				close(i.wait)
 				continue
 			}
-			// Calculate item cost value if new or update.
+
+			// 在更新或新增缓存对象时，计算它的cost
 			if i.Cost == 0 && c.cost != nil && i.flag != itemDelete {
 				i.Cost = c.cost(i.Value)
 			}
 			if !c.ignoreInternalCost {
 				// Add the cost of internally storing the object.
+				//
 				i.Cost += itemSize
 			}
 

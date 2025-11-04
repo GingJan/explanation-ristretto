@@ -111,6 +111,7 @@ func (p *defaultPolicy[V]) Add(key uint64, cost int64) ([]*Item[V], bool) {
 	// Calculate the remaining room in the cache (usually bytes).
 	room := p.evict.roomLeft(cost)
 	if room >= 0 {
+		//剩余空间足够，直接添加新key，不用淘汰旧key
 		// There's enough room in the cache to store the new item without
 		// overflowing. Do that now and stop here.
 		p.evict.add(key, cost)
@@ -119,7 +120,7 @@ func (p *defaultPolicy[V]) Add(key uint64, cost int64) ([]*Item[V], bool) {
 	}
 
 	// incHits is the hit count for the incoming item.
-	incHits := p.admit.Estimate(key)
+	incHits := p.admit.Estimate(key) //获取该key现在的命中次数
 	// sample is the eviction candidate pool to be filled via random sampling.
 	// TODO: perhaps we should use a min heap here. Right now our time
 	// complexity is N for finding the min. Min heap should bring it down to
@@ -130,36 +131,35 @@ func (p *defaultPolicy[V]) Add(key uint64, cost int64) ([]*Item[V], bool) {
 
 	// Delete victims until there's enough space or a minKey is found that has
 	// more hits than incoming item.
-	for ; room < 0; room = p.evict.roomLeft(cost) {
+	for ; room < 0; room = p.evict.roomLeft(cost) { //如果剩余的空间（仍）不足，则（再继续）淘汰hit最小的key
 		// Fill up empty slots in sample.
-		sample = p.evict.fillSample(sample)
+		sample = p.evict.fillSample(sample) //从全部样本里取足5个出来（每一次loop会把当前sample 5个里最小hit的key淘汰）
 
 		// Find minimally used item in sample.
 		minKey, minHits, minId, minCost := uint64(0), int64(math.MaxInt64), 0, int64(0)
 		for i, pair := range sample {
 			// Look up hit count for sample key.
-			if hits := p.admit.Estimate(pair.key); hits < minHits {
+			if hits := p.admit.Estimate(pair.key); hits < minHits { //找出最小hit的旧key
 				minKey, minHits, minId, minCost = pair.key, hits, i, pair.cost
 			}
 		}
 
-		// If the incoming item isn't worth keeping in the policy, reject.
-		if incHits < minHits {
+		if incHits < minHits { //如果新key的hit次数小于最小hit次数的旧key，则拒绝添加新key到缓存里（新key不值得缓存）
 			p.metrics.add(rejectSets, key, 1)
 			return victims, false
 		}
 
-		// Delete the victim from metadata.
+		// 淘汰无用的key（hit次数最小的旧key）
 		p.evict.del(minKey)
 
 		// Delete the victim from sample.
 		sample[minId] = sample[len(sample)-1]
 		sample = sample[:len(sample)-1]
-		// Store victim in evicted victims slice.
+		//被淘汰的旧key
 		victims = append(victims, &Item[V]{
-			Key:      minKey,
+			Key:      minKey, //被淘汰的key哈希值
 			Conflict: 0,
-			Cost:     minCost,
+			Cost:     minCost, //被淘汰的key的cost/占用空间
 		})
 	}
 
@@ -194,6 +194,7 @@ func (p *defaultPolicy[V]) Update(key uint64, cost int64) {
 	p.Unlock()
 }
 
+// 获取key的cost
 func (p *defaultPolicy[V]) Cost(key uint64) int64 {
 	p.Lock()
 	if cost, found := p.evict.keyCosts[key]; found {
@@ -247,10 +248,10 @@ type sampledLFU struct {
 	// for 64-bit alignment of 64-bit words accessed atomically.
 	// The first word in a variable or in an allocated struct, array,
 	// or slice can be relied upon to be 64-bit aligned."
-	maxCost  int64
-	used     int64
+	maxCost  int64 //最大可用空间
+	used     int64 //当前LFU已用空间
 	metrics  *Metrics
-	keyCosts map[uint64]int64
+	keyCosts map[uint64]int64 //key哈希值1 => cost
 }
 
 func newSampledLFU(maxCost int64) *sampledLFU {
@@ -268,6 +269,7 @@ func (p *sampledLFU) updateMaxCost(maxCost int64) {
 	atomic.StoreInt64(&p.maxCost, maxCost)
 }
 
+// 剩余空间
 func (p *sampledLFU) roomLeft(cost int64) int64 {
 	return p.getMaxCost() - (p.used + cost)
 }
@@ -276,7 +278,7 @@ func (p *sampledLFU) fillSample(in []*policyPair) []*policyPair {
 	if len(in) >= lfuSample {
 		return in
 	}
-	for key, cost := range p.keyCosts {
+	for key, cost := range p.keyCosts { //随机
 		in = append(in, &policyPair{key, cost})
 		if len(in) >= lfuSample {
 			return in
@@ -330,7 +332,7 @@ func (p *sampledLFU) clear() {
 // tinyLFU is NOT thread safe.
 type tinyLFU struct {
 	freq    *cmSketch
-	door    *z.Bloom
+	door    *z.Bloom //布隆过滤器
 	incrs   int64
 	resetAt int64
 }
@@ -350,7 +352,7 @@ func (p *tinyLFU) Push(keys []uint64) {
 }
 
 func (p *tinyLFU) Estimate(key uint64) int64 {
-	hits := p.freq.Estimate(key)
+	hits := p.freq.Estimate(key) //获取该key现在的命中次数
 	if p.door.Has(key) {
 		hits++
 	}

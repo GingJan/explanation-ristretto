@@ -17,7 +17,7 @@ type storeItem[V any] struct {
 	key        uint64    //key的哈希值1
 	conflict   uint64    //key的哈希值2
 	value      V         //存储的值
-	expiration time.Time //过期时间
+	expiration time.Time //key的过期时间
 }
 
 // store is the interface fulfilled by all hash map implementations in this
@@ -80,6 +80,7 @@ func (sm *shardedMap[V]) Get(key, conflict uint64) (V, bool) {
 	return sm.shards[key%numShards].get(key, conflict)
 }
 
+// 获取key的过期时间
 func (sm *shardedMap[V]) Expiration(key uint64) time.Time {
 	return sm.shards[key%numShards].Expiration(key)
 }
@@ -151,6 +152,7 @@ func (m *lockedMap[V]) get(key, conflict uint64) (V, bool) {
 	return item.value, true
 }
 
+// 获取key的过期时间
 func (m *lockedMap[V]) Expiration(key uint64) time.Time {
 	m.RLock()
 	defer m.RUnlock()
@@ -201,11 +203,11 @@ func (m *lockedMap[V]) Del(key, conflict uint64) (uint64, V) {
 	if !ok {
 		return 0, zeroValue[V]()
 	}
-	if conflict != 0 && (conflict != item.conflict) {
+	if conflict != 0 && (conflict != item.conflict) { //不是同一个key（key冲突了）
 		return 0, zeroValue[V]()
 	}
 
-	if !item.expiration.IsZero() {
+	if !item.expiration.IsZero() { //非永久的
 		m.em.del(key, item.expiration)
 	}
 

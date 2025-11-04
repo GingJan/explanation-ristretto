@@ -109,6 +109,7 @@ func (bl *Bloom) Add(hash uint64) {
 
 // Has checks if bit(s) for entry hash is/are set,
 // returns true if the hash was added to the Bloom Filter.
+// 该布隆过滤器是否已有这个key的记录
 func (bl Bloom) Has(hash uint64) bool {
 	h := hash >> bl.shift
 	l := hash << bl.shift >> bl.shift
