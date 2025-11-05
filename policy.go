@@ -153,6 +153,7 @@ func (p *defaultPolicy[V]) Add(key uint64, cost int64) ([]*Item[V], bool) {
 		p.evict.del(minKey)
 
 		// Delete the victim from sample.
+		// 从随机取出的样本里，移除该victim
 		sample[minId] = sample[len(sample)-1]
 		sample = sample[:len(sample)-1]
 		//被淘汰的旧key
