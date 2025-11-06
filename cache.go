@@ -183,7 +183,7 @@ type Item[V any] struct {
 	Value      V
 	Cost       int64 //占用的内存空间/字节
 	Expiration time.Time
-	wait       chan struct{}
+	wait       chan struct{} //用于给缓存设置的调用方阻塞等待缓存写入完成后才返回
 }
 
 // NewCache returns a new Cache instance and any configuration errors, if any.
@@ -340,7 +340,7 @@ func (c *Cache[K, V]) SetWithTTL(key K, value V, cost int64, ttl time.Duration) 
 	}
 	// Attempt to send item to cachePolicy.
 	select {
-	case c.setBuf <- i:
+	case c.setBuf <- i: //SetWithTTL
 		return true
 	default:
 		if i.flag == itemUpdate {
@@ -367,7 +367,7 @@ func (c *Cache[K, V]) Del(key K) {
 	// So we must push the same item to `setBuf` with the deletion flag.
 	// This ensures that if a set is followed by a delete, it will be
 	// applied in the correct order.
-	c.setBuf <- &Item[V]{
+	c.setBuf <- &Item[V]{ //Del
 		flag:     itemDelete,
 		Key:      keyHash,
 		Conflict: conflictHash,
@@ -413,7 +413,7 @@ func (c *Cache[K, V]) Close() {
 	<-c.done
 	close(c.stop)
 	close(c.done)
-	close(c.setBuf)
+	close(c.setBuf) //Close
 	c.cachePolicy.Close()
 	c.cleanupTicker.Stop()
 	c.isClosed.Store(true)
@@ -435,7 +435,7 @@ func (c *Cache[K, V]) Clear() {
 loop:
 	for {
 		select {
-		case i := <-c.setBuf:
+		case i := <-c.setBuf: //Clear
 			if i.wait != nil {
 				close(i.wait)
 				continue
@@ -517,7 +517,7 @@ func (c *Cache[K, V]) processItems() {
 
 	for {
 		select {
-		case i := <-c.setBuf: //set请求都会到这里处理
+		case i := <-c.setBuf: //processItems set请求都会到这里处理
 			if i.wait != nil {
 				close(i.wait)
 				continue
